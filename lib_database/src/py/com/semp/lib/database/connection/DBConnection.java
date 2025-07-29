@@ -1,5 +1,6 @@
 package py.com.semp.lib.database.connection;
 
+import java.lang.invoke.ClassSpecializer.Factory;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -13,10 +14,17 @@ import java.util.Map;
 import py.com.lib.database.service.ActiveStatements;
 import py.com.lib.database.sql.SQLStatement;
 import py.com.lib.database.util.DBFilters;
-import py.com.lib.database.values.Values;
 import py.com.lib.util.log.Debug;
-import py.com.lib.util.utilities.Factory;
 import py.com.lib.util.values.Variables;
+import py.com.semp.lib.database.configuration.DatabaseConfiguration;
+import py.com.semp.lib.database.configuration.Values;
+import py.com.semp.lib.database.internal.MessageUtil;
+import py.com.semp.lib.database.internal.Messages;
+import py.com.semp.lib.utilidades.exceptions.DataAccessException;
+import py.com.semp.lib.utilidades.log.Logger;
+import py.com.semp.lib.utilidades.log.LoggerManager;
+
+//TODO verificar null para auto commit, debug de meta datos al conectar
 
 /**
  * Wrapper de conexi&oacute;n a base de datos.
@@ -25,81 +33,87 @@ import py.com.lib.util.values.Variables;
  */
 public final class DBConnection
 {
-	private static final String NAMED_STATEMENT_ERROR = "Este método no maneja named statements";
+	private static final Logger LOGGER = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
 	
-	private Connection connection;
-	private DatabaseEngine dbManager;
 	private Object key;
-	private String database;
-	private String user;
-	private String password;
-	private String host;
+	private Connection connection;
+	private DatabaseConfiguration configuration;
 	
-	DBConnection(Object key)
+	public DBConnection(Object key)
 	{
 		super();
-		this.connection = null;
 		
-		Object databaseManager = Variables.get(Values.Constants.DATABASE_CONTEXT, Values.VariableNames.DATABASE_MANAGER);
-		if(databaseManager != null)
+		this.key = key;
+		this.connection = null;
+	}
+	
+	public DBConnection(Object key, DatabaseConfiguration configuration)
+	{
+		super();
+		
+		this.connection = null;
+		this.configuration = configuration;
+		this.key = key;
+	}
+	
+	public void connect(DatabaseConfiguration configuration)
+	{
+		if(!configuration.checkRequiredParameters())
 		{
-			this.dbManager = DatabaseEngine.valueOf(databaseManager.toString());
-		}
-		
-		this.key = key;
-		this.database = Variables.get(Values.Constants.DATABASE_CONTEXT, String.class, Values.VariableNames.DATABASE_NAME);
-		this.user = Variables.get(Values.Constants.DATABASE_CONTEXT, String.class, Values.VariableNames.USER_NAME);
-		this.password = Variables.get(Values.Constants.DATABASE_CONTEXT, String.class, Values.VariableNames.PASSWORD);
-		this.host = Variables.get(Values.Constants.DATABASE_CONTEXT, String.class, Values.VariableNames.HOST_ADDRESS);
-	}
-	
-	DBConnection(Object key, DBManager gestorBD, String baseDatos, String usuario, String password, String host)
-	{
-		super();
-		this.connection = null;
-		
-		this.key = key;
-		this.dbManager = gestorBD;
-		this.database = baseDatos;
-		this.user = usuario;
-		this.password = password;
-		this.host = host;
-	}
-	
-	DBConnection(Object key, String dbManager, String database, String user, String password, String host)
-	{
-		super();
-		this.connection = null;
-		
-		this.key = key;
-		this.dbManager = DBManager.valueOf(dbManager);
-		this.database = database;
-		this.user = user;
-		this.password = password;
-		this.host = host;
-	}
-	
-	void connect() throws ClassNotFoundException, SQLException
-	{
-		Class.forName(this.dbManager.getDriver());
-		String url = this.dbManager.getUrl(this.host, this.database);
-		
-		Debug.message(Values.Constants.DATABASE_CONTEXT, url);
-		
-		Integer timeout = Values.Constants.DEFAULT_LOGIN_TIMEOUT;
-		
-		if(Variables.contains(Values.Constants.DATABASE_CONTEXT, Values.VariableNames.LOGIN_TIMEOUT))
-		{
-			Object loginTimeout = Variables.get(Values.Constants.DATABASE_CONTEXT, Values.VariableNames.LOGIN_TIMEOUT);
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
 			
-			if(loginTimeout != null)
-				timeout = Integer.valueOf(loginTimeout.toString());
+			throw new DataAccessException(errorMessage);
 		}
+		
+		this.configuration = configuration;
+		
+		this.connect();
+	}
+	
+	public void connect() throws DataAccessException
+	{
+		if(this.configuration == null)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
+			
+			throw new DataAccessException(errorMessage);
+		}
+		
+		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		
+		String driverClass = dbEngine.getDriverClass();
+		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
+		Integer timeout = this.configuration.getValue(Values.VariableNames.CONNECTION_TIMEOUT_SECONDS);
+		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
+		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		
+		try
+		{
+			Class.forName(driverClass);
+		}
+		catch(ClassNotFoundException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_DRIVER_NOT_FOUND_ERROR, driverClass);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
+		
+		String message = MessageUtil.getMessage(Messages.CONNECTING_TO_DATABASE, dbEngine.name(), driverClass, timeout, url, user);
+		
+		LOGGER.debug(message);
 		
 		DriverManager.setLoginTimeout(timeout);
 		
-		this.connection = DriverManager.getConnection(url, this.user, this.password);
-		this.connection.setAutoCommit(false);
+		try
+		{
+			this.connection = DriverManager.getConnection(url, user, password);
+		}
+		catch(SQLException e)
+		{
+			throw new DataAccessException(message, e);
+		}
+		
+		this.setAutoCommit(false);
 	}
 	
 	void closeConnection() throws SQLException
@@ -591,14 +605,34 @@ public final class DBConnection
 		}
 	}
 	
-	public void setAutoCommit(boolean autoCommit) throws SQLException
+	public void setAutoCommit(boolean autoCommit) throws DataAccessException
 	{
-		this.connection.setAutoCommit(autoCommit);
+		try
+		{
+			this.connection.setAutoCommit(autoCommit);
+			
+			String message = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT, autoCommit);
+			
+			LOGGER.debug(message);
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT_ERROR, autoCommit);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
 	}
 	
-	public boolean getAutoCommit() throws SQLException
+	public boolean getAutoCommit() throws DataAccessException
 	{
-		return this.connection.getAutoCommit();
+		try
+		{
+			return this.connection.getAutoCommit();
+		}
+		catch(SQLException e)
+		{
+			throw new DataAccessException(e);
+		}
 	}
 	
 	/**
