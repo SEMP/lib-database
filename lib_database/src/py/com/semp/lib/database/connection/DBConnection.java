@@ -24,8 +24,6 @@ import py.com.semp.lib.utilidades.exceptions.DataAccessException;
 import py.com.semp.lib.utilidades.log.Logger;
 import py.com.semp.lib.utilidades.log.LoggerManager;
 
-//TODO verificar null para auto commit, debug de meta datos al conectar
-
 /**
  * Wrapper de conexi&oacute;n a base de datos.
  * 
@@ -98,9 +96,9 @@ public final class DBConnection
 			throw new DataAccessException(errorMessage, e);
 		}
 		
-		String message = MessageUtil.getMessage(Messages.CONNECTING_TO_DATABASE, dbEngine.name(), driverClass, timeout, url, user);
+		String debugMessage = MessageUtil.getMessage(Messages.CONNECTING_TO_DATABASE, dbEngine.name(), driverClass, timeout, url, user);
 		
-		LOGGER.debug(message);
+		LOGGER.debug(debugMessage);
 		
 		DriverManager.setLoginTimeout(timeout);
 		
@@ -110,17 +108,123 @@ public final class DBConnection
 		}
 		catch(SQLException e)
 		{
-			throw new DataAccessException(message, e);
+			throw new DataAccessException(debugMessage, e);
 		}
 		
 		this.setAutoCommit(false);
+		
+		try
+		{
+			DatabaseMetaData meta = this.connection.getMetaData();
+			
+			String message = MessageUtil.getMessage(Messages.DATABASE_CONNECTED, meta.getDatabaseProductName(), meta.getDatabaseProductVersion());
+			
+			LOGGER.info(message);
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.UNABLE_T0_OBTAIN_METADATA_ERROR);
+			
+			LOGGER.warning(errorMessage, e);
+		}
 	}
 	
-	void closeConnection() throws SQLException
+	public void closeConnection() throws DataAccessException
 	{
-		if(this.connection != null && !this.connection.isClosed())
+		if(this.isConnected())
 		{
-			this.connection.close();
+			try
+			{
+				this.connection.close();
+			}
+			catch(SQLException e)
+			{
+				String errorMessage = MessageUtil.getMessage(Messages.CLOSING_DATABASE_ERROR);
+				
+				throw new DataAccessException(errorMessage, e);
+			}
+		}
+	}
+	
+	public boolean isConnected()
+	{
+		try
+		{
+			return this.connection != null && !this.connection.isClosed();
+		}
+		catch(SQLException e)
+		{
+			return false;
+		}
+	}
+	
+	public void setAutoCommit(boolean autoCommit) throws DataAccessException
+	{
+		try
+		{
+			if(this.isConnected())
+			{
+				this.connection.setAutoCommit(autoCommit);
+				
+				String message = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT, autoCommit);
+				
+				LOGGER.debug(message);
+			}
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT_ERROR, autoCommit);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
+	}
+	
+	public boolean getAutoCommit() throws DataAccessException
+	{
+		try
+		{
+			return this.connection.getAutoCommit();
+		}
+		catch(SQLException e)
+		{
+			String erroMessage = MessageUtil.getMessage(Messages.GET_AUTO_COMMIT_ERROR);
+			
+			throw new DataAccessException(erroMessage, e);
+		}
+	}
+	
+	/**
+	 * Realiza un commit de la conexi&oacute;n.
+	 * @throws DataAccessException
+	 * en caso de ocurrir alg&uacute;n error con la base de datos.
+	 */
+	public void commit() throws DataAccessException
+	{
+		try
+		{
+			if(this.isConnected())
+			{
+				this.connection.commit();
+			}
+		}
+		catch(SQLException e)
+		{
+			String erroMessage = MessageUtil.getMessage(Messages.COMMIT_ERROR);
+			
+			throw new DataAccessException(erroMessage, e);
+		}
+	}
+	
+	/**
+	 * Realiza un rollback de la conexi&oacute;n.
+	 * @throws SQLException
+	 * en caso de ocurrir alg&uacute;n error con la base de datos.
+	 */
+	public void rollback() throws SQLException
+	{
+		if(this.isConnected())
+		{
+			this.connection.rollback();
 		}
 	}
 	
@@ -603,61 +707,6 @@ public final class DBConnection
 		{
 			ps.setObject(i, parameter);
 		}
-	}
-	
-	public void setAutoCommit(boolean autoCommit) throws DataAccessException
-	{
-		try
-		{
-			this.connection.setAutoCommit(autoCommit);
-			
-			String message = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT, autoCommit);
-			
-			LOGGER.debug(message);
-		}
-		catch(SQLException e)
-		{
-			String errorMessage = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT_ERROR, autoCommit);
-			
-			throw new DataAccessException(errorMessage, e);
-		}
-	}
-	
-	public boolean getAutoCommit() throws DataAccessException
-	{
-		try
-		{
-			return this.connection.getAutoCommit();
-		}
-		catch(SQLException e)
-		{
-			throw new DataAccessException(e);
-		}
-	}
-	
-	/**
-	 * Realiza un commit de la conexi&oacute;n.
-	 * @throws SQLException
-	 * en caso de ocurrir alg&uacute;n error con la base de datos.
-	 */
-	public void commit() throws SQLException
-	{
-		this.connection.commit();
-	}
-	
-	/**
-	 * Realiza un rollback de la conexi&oacute;n.
-	 * @throws SQLException
-	 * en caso de ocurrir alg&uacute;n error con la base de datos.
-	 */
-	public void rollback() throws SQLException
-	{
-		this.connection.rollback();
-	}
-	
-	public boolean isConnected() throws SQLException
-	{
-		return this.connection != null && !this.connection.isClosed();
 	}
 	
 	@Override
