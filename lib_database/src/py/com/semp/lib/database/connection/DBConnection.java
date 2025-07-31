@@ -1,6 +1,7 @@
 package py.com.semp.lib.database.connection;
 
 import java.lang.invoke.ClassSpecializer.Factory;
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -15,7 +16,6 @@ import py.com.lib.database.service.ActiveStatements;
 import py.com.lib.database.sql.SQLStatement;
 import py.com.lib.database.util.DBFilters;
 import py.com.lib.util.log.Debug;
-import py.com.lib.util.values.Variables;
 import py.com.semp.lib.database.configuration.DatabaseConfiguration;
 import py.com.semp.lib.database.configuration.Values;
 import py.com.semp.lib.database.internal.MessageUtil;
@@ -25,7 +25,11 @@ import py.com.semp.lib.utilidades.log.Logger;
 import py.com.semp.lib.utilidades.log.LoggerManager;
 
 /**
- * Wrapper de conexi&oacute;n a base de datos.
+ * Database connection wrapper.
+ * 
+ * <p>
+ * Manages connection lifecycle, configuration, and transaction control.
+ * </p>
  * 
  * @author Sergio Morel
  */
@@ -52,6 +56,11 @@ public final class DBConnection
 		this.connection = null;
 		this.configuration = configuration;
 		this.key = key;
+	}
+	
+	public Object getKey()
+	{
+		return this.key;
 	}
 	
 	public void connect(DatabaseConfiguration configuration)
@@ -115,17 +124,29 @@ public final class DBConnection
 		
 		try
 		{
-			DatabaseMetaData meta = this.connection.getMetaData();
+			DatabaseMetaData meta = this.getMetaData(); 
 			
 			String message = MessageUtil.getMessage(Messages.DATABASE_CONNECTED, meta.getDatabaseProductName(), meta.getDatabaseProductVersion());
 			
 			LOGGER.info(message);
 		}
+		catch(DataAccessException e)
+		{
+			LOGGER.warning(e);
+		}
+	}
+	
+	public DatabaseMetaData getMetaData() throws DataAccessException
+	{
+		try
+		{
+			return this.connection.getMetaData();
+		}
 		catch(SQLException e)
 		{
 			String errorMessage = MessageUtil.getMessage(Messages.UNABLE_T0_OBTAIN_METADATA_ERROR);
 			
-			LOGGER.warning(errorMessage, e);
+			throw new DataAccessException(errorMessage, e);
 		}
 	}
 	
@@ -187,9 +208,9 @@ public final class DBConnection
 		}
 		catch(SQLException e)
 		{
-			String erroMessage = MessageUtil.getMessage(Messages.GET_AUTO_COMMIT_ERROR);
+			String errorMessage = MessageUtil.getMessage(Messages.GET_AUTO_COMMIT_ERROR);
 			
-			throw new DataAccessException(erroMessage, e);
+			throw new DataAccessException(errorMessage, e);
 		}
 	}
 	
@@ -209,9 +230,9 @@ public final class DBConnection
 		}
 		catch(SQLException e)
 		{
-			String erroMessage = MessageUtil.getMessage(Messages.COMMIT_ERROR);
+			String errorMessage = MessageUtil.getMessage(Messages.COMMIT_ERROR);
 			
-			throw new DataAccessException(erroMessage, e);
+			throw new DataAccessException(errorMessage, e);
 		}
 	}
 	
@@ -220,52 +241,103 @@ public final class DBConnection
 	 * @throws SQLException
 	 * en caso de ocurrir alg&uacute;n error con la base de datos.
 	 */
-	public void rollback() throws SQLException
+	public void rollback() throws DataAccessException
 	{
-		if(this.isConnected())
+		try
 		{
-			this.connection.rollback();
+			if(this.isConnected())
+			{
+				this.connection.rollback();
+			}
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.ROLLBACK_ERROR);
+			
+			throw new DataAccessException(errorMessage, e);
 		}
 	}
 	
-	public int executeUpdate(String sql) throws SQLException
+	public Statement createStatement() throws DataAccessException
 	{
-		Statement stm = this.connection.createStatement();
+		if(this.configuration == null)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
+			
+			throw new DataAccessException(errorMessage);
+		}
 		
-		ActiveStatements.addStatement(this.getKey(), stm);
+		try
+		{
+			return this.connection.createStatement();
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.CREATING_STATEMENT_ERROR);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
+	}
+
+	/**
+	 * Obtiene un prepared statement con la instrucci&oacute;n sql pasada por par&aacute;metro.
+	 * @param sql
+	 * instrucci&oacute;n sql.
+	 * @return
+	 * prepared statement
+	 * @throws SQLException
+	 * en caso de ocurrir alg&uacute;n error con la base de datos.
+	 */
+	public PreparedStatement createPreparedStatement(String sql) throws DataAccessException
+	{
+		if(this.configuration == null)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
+			
+			throw new DataAccessException(errorMessage);
+		}
 		
-		int rowCount = stm.executeUpdate(sql);
-		stm.close();
-		
-		ActiveStatements.removeStatement(this.getKey(), stm);
-		
-		return rowCount;
+		try
+		{
+			return this.connection.prepareStatement(sql);
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.CREATING_PREPARED_STATEMENT_ERROR, sql);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
 	}
 	
-	public Object getKey()
+	public int executeUpdate(String sql) throws DataAccessException
 	{
-		return this.key;
+		try(Statement stm = this.createStatement())
+		{
+			return stm.executeUpdate(sql);
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.QUERY_EXECUTION_ERROR, sql);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
 	}
 	
-	public int executeUpdate(SQLStatement sqlStatement) throws SQLException
-	{
-		return this.executeUpdate(sqlStatement.toPreparedString(), sqlStatement.getFieldValues());
-	}
-	
+	//TODO implemenar namedQuery para nombres con : y :: de escape
 	public int executeUpdate(String sql, Object... parameters) throws SQLException
 	{
 		if(DBFilters.isNumberedQuery(sql))
 		{
 			return this.executeNumberedUpdate(sql, parameters);
 		}
-		else if(DBFilters.isNamedQuery(sql))
+		
+		if(DBFilters.isNamedQuery(sql))
 		{
 			throw new IllegalArgumentException(NAMED_STATEMENT_ERROR);
 		}
-		else
+		
+		try(PreparedStatement ps = this.connection.prepareStatement(sql))
 		{
-			PreparedStatement ps = this.connection.prepareStatement(sql);
-			
 			for (int i = 0; i < parameters.length; i++)
 			{
 				setParameterStatement(ps, i, parameters[i]);
@@ -358,16 +430,6 @@ public final class DBConnection
 		ActiveStatements.removeStatement(this.getKey(), stm);
 		
 		return resultSet;
-	}
-	
-	public ResultSet executeQuery(SQLStatement sqlStatement) throws SQLException
-	{
-		return this.executeQuery(sqlStatement.toPreparedString(), sqlStatement.getFieldValues());
-	}
-	
-	public ResultSet executeQuery(int fetchSize, SQLStatement sqlStatement) throws SQLException
-	{
-		return this.executeQuery(fetchSize, sqlStatement.toPreparedString(), sqlStatement.getFieldValues());
 	}
 	
 	public ResultSet executeQuery(String sql, Object... parameters) throws SQLException
@@ -619,25 +681,6 @@ public final class DBConnection
 		return newSql.toString();
 	}
 	
-	public DatabaseMetaData getMetaData() throws SQLException
-	{
-		return this.connection.getMetaData();
-	}
-	
-	/**
-	 * Obtiene un prepared statement con la instrucci&oacute;n sql pasada por par&aacute;metro.
-	 * @param sql
-	 * instrucci&oacute;n sql.
-	 * @return
-	 * prepared statement
-	 * @throws SQLException
-	 * en caso de ocurrir alg&uacute;n error con la base de datos.
-	 */
-	public PreparedStatement prepareStatement(String sql) throws SQLException
-	{
-		return this.connection.prepareStatement(sql);
-	}
-	
 	/**
 	 * Establece el valor en el prepared statement de acuerdo al tipo de dato del mismo.
 	 * @param ps
@@ -649,63 +692,76 @@ public final class DBConnection
 	 * @throws SQLException
 	 * en caso de ocurrir alg&uacute;n error con la base de datos.
 	 */
-	public static void setParameterStatement(PreparedStatement ps, int index, Object parameter) throws SQLException
+	public static void setParameterStatement(PreparedStatement ps, int index, Object parameter) throws DataAccessException
 	{
 		int i = index + 1;
 		
-		if(parameter instanceof String)
+		try
 		{
-			ps.setString(i, (String)parameter);
+			if(parameter instanceof String)
+			{
+				ps.setString(i, (String)parameter);
+			}
+			else if(parameter instanceof Short)
+			{
+				ps.setShort(i, (Short)parameter);
+			}
+			else if(parameter instanceof Integer)
+			{
+				ps.setInt(i, (Integer)parameter);
+			}
+			else if(parameter instanceof Long)
+			{
+				ps.setLong(i, (Long)parameter);
+			}
+			else if(parameter instanceof Float)
+			{
+				ps.setFloat(i, (Float)parameter);
+			}
+			else if(parameter instanceof Double)
+			{
+				ps.setDouble(i, (Double)parameter);
+			}
+			else if(parameter instanceof BigDecimal)
+			{
+				ps.setBigDecimal(i, (BigDecimal)parameter);
+			}
+			else if(parameter instanceof java.sql.Date)
+			{
+				ps.setDate(i, (java.sql.Date)parameter);
+			}
+			else if(parameter instanceof java.sql.Time)
+			{
+				ps.setTime(i, (java.sql.Time)parameter);
+			}
+			else if(parameter instanceof java.sql.Timestamp)
+			{
+				ps.setTimestamp(i, (java.sql.Timestamp)parameter);
+			}
+			else if(parameter instanceof java.util.Date)
+			{
+				java.util.Date fecha = (java.util.Date)parameter;
+				java.sql.Timestamp sqlTimeStamp = new java.sql.Timestamp(fecha.getTime());
+				ps.setTimestamp(i, sqlTimeStamp);
+			}
+			else if(parameter instanceof byte[])
+			{
+				ps.setBytes(i, (byte[])parameter);
+			}
+			else if(parameter instanceof Boolean)
+			{
+				ps.setBoolean(i, (Boolean)parameter);
+			}
+			else
+			{
+				ps.setObject(i, parameter);
+			}
 		}
-		else if(parameter instanceof Short)
+		catch (SQLException e)
 		{
-			ps.setShort(i, (Short)parameter);
-		}
-		else if(parameter instanceof Integer)
-		{
-			ps.setInt(i, (Integer)parameter);
-		}
-		else if(parameter instanceof Long)
-		{
-			ps.setLong(i, (Long)parameter);
-		}
-		else if(parameter instanceof Float)
-		{
-			ps.setFloat(i, (Float)parameter);
-		}
-		else if(parameter instanceof Double)
-		{
-			ps.setDouble(i, (Double)parameter);
-		}
-		else if(parameter instanceof java.sql.Date)
-		{
-			ps.setDate(i, (java.sql.Date)parameter);
-		}
-		else if(parameter instanceof java.sql.Time)
-		{
-			ps.setTime(i, (java.sql.Time)parameter);
-		}
-		else if(parameter instanceof java.sql.Timestamp)
-		{
-			ps.setTimestamp(i, (java.sql.Timestamp)parameter);
-		}
-		else if(parameter instanceof java.util.Date)
-		{
-			java.util.Date fecha = (java.util.Date)parameter;
-			java.sql.Timestamp sqlTimeStamp = new java.sql.Timestamp(fecha.getTime());
-			ps.setTimestamp(i, sqlTimeStamp);
-		}
-		else if(parameter instanceof byte[])
-		{
-			ps.setBytes(i, (byte[])parameter);
-		}
-		else if(parameter instanceof Boolean)
-		{
-			ps.setBoolean(i, (Boolean)parameter);
-		}
-		else
-		{
-			ps.setObject(i, parameter);
+			String errorMessage = MessageUtil.getMessage(Messages.SETTING_STATEMENT_PARAMETER_ERROR, index);
+			
+			throw new DataAccessException(errorMessage, e);
 		}
 	}
 	
@@ -724,27 +780,32 @@ public final class DBConnection
 		
 		DBConnection conexion = (DBConnection)obj;
 		
-		if(!((this.dbManager == null) ? conexion.dbManager == null : this.dbManager.equals(conexion.dbManager)))
+		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
+		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
+		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		
+		DatabaseEngine objDbEngine = conexion.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		String objUrl = conexion.configuration.getValue(Values.VariableNames.DATABASE_URL);
+		String objUser = conexion.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
+		String objPassword = conexion.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		
+		if(!((dbEngine == null) ? objDbEngine == null : dbEngine == objDbEngine))
 		{
 			return false;
 		}
 		
-		if(!((this.database == null) ? conexion.database == null : this.database.equals(conexion.database)))
+		if(!((url == null) ? objUrl == null : url.equals(objUrl)))
 		{
 			return false;
 		}
 		
-		if(!((this.user == null) ? conexion.user == null : this.user.equals(conexion.user)))
+		if(!((user== null) ? objUser == null : user.equals(objUser)))
 		{
 			return false;
 		}
 		
-		if(!((this.password == null) ? conexion.password == null : this.password.equals(conexion.password)))
-		{
-			return false;
-		}
-		
-		if(!((this.host == null) ? conexion.host == null : this.host.equals(conexion.host)))
+		if(!((password == null) ? objPassword == null : password.equals(objPassword)))
 		{
 			return false;
 		}
@@ -755,13 +816,17 @@ public final class DBConnection
 	@Override
 	public int hashCode() 
 	{
+		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
+		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
+		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		
 		final int prime = 31;
 		int result = 1;
-		result = prime * result	+ ((database == null) ? 0 : database.hashCode());
-		result = prime * result + ((dbManager == null) ? 0 : dbManager.hashCode());
-		result = prime * result + ((host == null) ? 0 : host.hashCode());
-		result = prime * result + ((password == null) ? 0 : password.hashCode());
+		result = prime * result	+ ((dbEngine == null) ? 0 : dbEngine.hashCode());
+		result = prime * result + ((url == null) ? 0 : url.hashCode());
 		result = prime * result + ((user == null) ? 0 : user.hashCode());
+		result = prime * result + ((password == null) ? 0 : password.hashCode());
 		
 		return result;
 	}
@@ -771,9 +836,10 @@ public final class DBConnection
 	{
 		StringBuilder sb = new StringBuilder();
 		
-		sb.append(this.dbManager).append(" ");
-		sb.append(this.database).append("(");
-		sb.append(this.host).append(")");
+		sb.append(this.getClass().getSimpleName());
+		sb.append(":\n");
+		
+		sb.append(this.configuration);
 		
 		return sb.toString();
 	}
