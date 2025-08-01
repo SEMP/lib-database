@@ -25,6 +25,7 @@ public class DatabaseConfiguration extends ConfigurationValues
 	@Override
 	protected void setOptionalParameters()
 	{
+		this.addOptionalParameter(Integer.class, DATABASE_FETCH_SIZE);
 	}
 	
 	@Override

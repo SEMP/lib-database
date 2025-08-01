@@ -54,13 +54,20 @@ public final class DBConnection
 		super();
 		
 		this.connection = null;
-		this.configuration = configuration;
 		this.key = key;
+		this.setConfiguration(configuration);
 	}
 	
 	public Object getKey()
 	{
 		return this.key;
+	}
+	
+	private void setConfiguration(DatabaseConfiguration configuration)
+	{
+		//TODO check configuration
+		
+		this.configuration = configuration;
 	}
 	
 	public void connect(DatabaseConfiguration configuration)
@@ -72,19 +79,14 @@ public final class DBConnection
 			throw new DataAccessException(errorMessage);
 		}
 		
-		this.configuration = configuration;
+		this.setConfiguration(configuration);
 		
 		this.connect();
 	}
 	
 	public void connect() throws DataAccessException
 	{
-		if(this.configuration == null)
-		{
-			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
-			
-			throw new DataAccessException(errorMessage);
-		}
+		assertConfigured();
 		
 		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
 		
@@ -152,17 +154,50 @@ public final class DBConnection
 	
 	public void closeConnection() throws DataAccessException
 	{
-		if(this.isConnected())
+		if(this.connection != null)
 		{
 			try
 			{
 				this.connection.close();
+				
+				String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
+				
+				LOGGER.debug(debugMessage);
 			}
 			catch(SQLException e)
 			{
 				String errorMessage = MessageUtil.getMessage(Messages.CLOSING_DATABASE_ERROR);
 				
 				throw new DataAccessException(errorMessage, e);
+			}
+			finally
+			{
+				this.connection = null;
+			}
+		}
+	}
+	
+	public void silentClose()
+	{
+		if(this.connection != null)
+		{
+			try
+			{
+				this.connection.close();
+				
+				String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
+				
+				LOGGER.debug(debugMessage);
+			}
+			catch(SQLException e)
+			{
+				String errorMessage = MessageUtil.getMessage(Messages.CLOSING_DATABASE_ERROR);
+				
+				LOGGER.warning(errorMessage, e);
+			}
+			finally
+			{
+				this.connection = null;
 			}
 		}
 	}
@@ -260,15 +295,22 @@ public final class DBConnection
 	
 	public Statement createStatement() throws DataAccessException
 	{
-		if(this.configuration == null)
-		{
-			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
-			
-			throw new DataAccessException(errorMessage);
-		}
+		//TODO check also for is connected.
+		this.assertConfigured();
+		
+		this.assertConnected();
 		
 		try
 		{
+			Statement statement = this.connection.createStatement();
+			
+			Integer fetchSize = this.configuration.getValue(Values.VariableNames.DATABASE_FETCH_SIZE);
+			
+			if(fetchSize != null)
+			{
+				statement.setFetchSize(fetchSize);
+			}
+			
 			return this.connection.createStatement();
 		}
 		catch(SQLException e)
@@ -278,7 +320,27 @@ public final class DBConnection
 			throw new DataAccessException(errorMessage, e);
 		}
 	}
-
+	
+	private void assertConnected() throws DataAccessException
+	{
+		if(!this.isConnected())
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONNECTED_ERROR);
+			
+			throw new DataAccessException(errorMessage);
+		}
+	}
+	
+	private void assertConfigured() throws DataAccessException
+	{
+		if(this.configuration == null)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
+			
+			throw new DataAccessException(errorMessage);
+		}
+	}
+	
 	/**
 	 * Obtiene un prepared statement con la instrucci&oacute;n sql pasada por par&aacute;metro.
 	 * @param sql
@@ -290,12 +352,7 @@ public final class DBConnection
 	 */
 	public PreparedStatement createPreparedStatement(String sql) throws DataAccessException
 	{
-		if(this.configuration == null)
-		{
-			String errorMessage = MessageUtil.getMessage(Messages.DATABASE_NOT_CONFIGURED_ERROR);
-			
-			throw new DataAccessException(errorMessage);
-		}
+		assertConfigured();
 		
 		try
 		{
@@ -323,19 +380,8 @@ public final class DBConnection
 		}
 	}
 	
-	//TODO implemenar namedQuery para nombres con : y :: de escape
-	public int executeUpdate(String sql, Object... parameters) throws SQLException
+	public int executeUpdate(String sql, Object... parameters) throws DataAccessException
 	{
-		if(DBFilters.isNumberedQuery(sql))
-		{
-			return this.executeNumberedUpdate(sql, parameters);
-		}
-		
-		if(DBFilters.isNamedQuery(sql))
-		{
-			throw new IllegalArgumentException(NAMED_STATEMENT_ERROR);
-		}
-		
 		try(PreparedStatement ps = this.connection.prepareStatement(sql))
 		{
 			for (int i = 0; i < parameters.length; i++)
@@ -343,40 +389,14 @@ public final class DBConnection
 				setParameterStatement(ps, i, parameters[i]);
 			}
 			
-			ActiveStatements.addStatement(this.getKey(), ps);
-			
-			int rowCount = ps.executeUpdate();
-			ps.close();
-			
-			ActiveStatements.removeStatement(this.getKey(), ps);
-			
-			return rowCount;
+			return ps.executeUpdate();
 		}
-	}
-	
-	public int executeNumberedUpdate(String sql, Object[] parameters) throws SQLException
-	{
-		List<Integer> indices = Factory.getLinkedList();
-		
-		String newSql = translateNumberedQuery(sql, indices);
-		
-		PreparedStatement ps = this.connection.prepareStatement(newSql);
-		
-		for(int i = 0; i < indices.size(); i++)
+		catch(SQLException e)
 		{
-			Integer parameterIndex = indices.get(i) - 1;
+			String errorMessage = MessageUtil.getMessage(Messages.QUERY_EXECUTION_ERROR, sql);
 			
-			setParameterStatement(ps, i, parameters[parameterIndex]);
+			throw new DataAccessException(errorMessage, e);
 		}
-		
-		ActiveStatements.addStatement(this.getKey(), ps);
-		
-		int rowCount = ps.executeUpdate();
-		ps.close();
-		
-		ActiveStatements.removeStatement(this.getKey(), ps);
-		
-		return rowCount;
 	}
 	
 	public int executeNamedUpdate(String sql, Map<String, Object> valuesMap) throws SQLException
@@ -404,17 +424,18 @@ public final class DBConnection
 		return rowCount;
 	}
 	
-	public ResultSet executeQuery(String sql) throws SQLException
+	public ResultSet executeQuery(String sql) throws DataAccessException
 	{
-		Statement stm = this.connection.createStatement();
-		
-		ActiveStatements.addStatement(this.getKey(), stm);
-		
-		ResultSet resultSet = stm.executeQuery(sql);
-		
-		ActiveStatements.removeStatement(this.getKey(), stm);
-		
-		return resultSet;
+		try(Statement stm = this.createStatement())
+		{
+			return stm.executeQuery(sql);
+		}
+		catch(SQLException e)
+		{
+			String errorMessage = MessageUtil.getMessage(Messages.QUERY_EXECUTION_ERROR, sql);
+			
+			throw new DataAccessException(errorMessage, e);
+		}
 	}
 	
 	public ResultSet executeQuery(int fetchSize, String sql) throws SQLException
@@ -490,56 +511,6 @@ public final class DBConnection
 			
 			return resultSet;
 		}
-	}
-	
-	public ResultSet executeNumberedQuery(String sql, Object... parameters) throws SQLException
-	{
-		List<Integer> indices = Factory.getLinkedList();
-		
-		String newSql = translateNumberedQuery(sql, indices);
-		
-		PreparedStatement ps = this.connection.prepareStatement(newSql);
-		
-		for(int i = 0; i < indices.size(); i++)
-		{
-			Integer parameterIndex = indices.get(i) - 1;
-			
-			setParameterStatement(ps, i, parameters[parameterIndex]);
-		}
-		
-		ActiveStatements.addStatement(this.getKey(), ps);
-		
-		ResultSet resultSet = ps.executeQuery();
-		
-		ActiveStatements.removeStatement(this.getKey(), ps);
-		
-		return resultSet; 
-	}
-	
-	public ResultSet executeNumberedQuery(int fetchSize, String sql, Object... parameters) throws SQLException
-	{
-		List<Integer> indices = Factory.getLinkedList();
-		
-		String newSql = translateNumberedQuery(sql, indices);
-		
-		PreparedStatement ps = this.connection.prepareStatement(newSql);
-		
-		for(int i = 0; i < indices.size(); i++)
-		{
-			Integer parameterIndex = indices.get(i) - 1;
-			
-			setParameterStatement(ps, i, parameters[parameterIndex]);
-		}
-		
-		ps.setFetchSize(fetchSize);
-		
-		ActiveStatements.addStatement(this.getKey(), ps);
-		
-		ResultSet resultSet = ps.executeQuery();
-		
-		ActiveStatements.removeStatement(this.getKey(), ps);
-		
-		return resultSet;
 	}
 	
 	public ResultSet executeNamedQuery(String sql, Map<String, Object> valuesMap) throws SQLException

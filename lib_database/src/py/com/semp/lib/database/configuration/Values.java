@@ -38,6 +38,7 @@ public interface Values
 	{
 		//Integer values
 		
+		public static final String DATABASE_FETCH_SIZE = "databaseFetchSize";
 		/**
 		 * Time out time in seconds for establishing connections.
 		 */
