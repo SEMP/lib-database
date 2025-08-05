@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import py.com.semp.lib.database.configuration.DatabaseConfiguration;
+import py.com.semp.lib.database.internal.MessageUtil;
+import py.com.semp.lib.database.internal.Messages;
 import py.com.semp.lib.utilidades.exceptions.DataAccessException;
 
 /**
@@ -16,12 +18,13 @@ import py.com.semp.lib.utilidades.exceptions.DataAccessException;
  */
 public final class DatabaseConnectionManager
 {
-	
-	private static final Map<Object, DatabaseConnection> connectionMap = new ConcurrentHashMap<>();
+	private static final Map<Object, DatabaseConnection> connectionsMap = new ConcurrentHashMap<>();
 	
 	private DatabaseConnectionManager()
 	{
-		throw new AssertionError("Do not instantiate DatabaseConnectionManager.");
+		String errorMessage = MessageUtil.getMessage(Messages.DONT_INSTANTIATE, this.getClass().getName());
+		
+		throw new AssertionError(errorMessage);
 	}
 	
 	/**
@@ -60,7 +63,7 @@ public final class DatabaseConnectionManager
 			throw new IllegalArgumentException("Connection key cannot be null.");
 		}
 		
-		DatabaseConnection current = connectionMap.get(key);
+		DatabaseConnection current = connectionsMap.get(key);
 		
 		if(current != null && configuration.equals(current.getConfiguration()))
 		{
@@ -80,7 +83,7 @@ public final class DatabaseConnectionManager
 		DatabaseConnection connection = new DatabaseConnection(key, configuration);
 		connection.connect();
 		
-		connectionMap.put(key, connection);
+		connectionsMap.put(key, connection);
 		return connection;
 	}
 	
@@ -99,7 +102,7 @@ public final class DatabaseConnectionManager
 	{
 		if(key == null) return;
 		
-		DatabaseConnection connection = connectionMap.remove(key);
+		DatabaseConnection connection = connectionsMap.remove(key);
 		if(connection != null)
 		{
 			connection.silentClose();
@@ -111,7 +114,7 @@ public final class DatabaseConnectionManager
 	 */
 	public static void closeAllConnections()
 	{
-		for(Map.Entry<Object, DatabaseConnection> entry : connectionMap.entrySet())
+		for(Map.Entry<Object, DatabaseConnection> entry : connectionsMap.entrySet())
 		{
 			DatabaseConnection conn = entry.getValue();
 			if(conn != null)
@@ -119,7 +122,7 @@ public final class DatabaseConnectionManager
 				conn.silentClose();
 			}
 		}
-		connectionMap.clear();
+		connectionsMap.clear();
 	}
 	
 	/**
@@ -127,7 +130,7 @@ public final class DatabaseConnectionManager
 	 */
 	public static int getConnectionCount()
 	{
-		return connectionMap.size();
+		return connectionsMap.size();
 	}
 	
 	/**
@@ -136,7 +139,7 @@ public final class DatabaseConnectionManager
 	public static String connectionsToString()
 	{
 		StringBuilder sb = new StringBuilder();
-		for(Map.Entry<Object, DatabaseConnection> entry : connectionMap.entrySet())
+		for(Map.Entry<Object, DatabaseConnection> entry : connectionsMap.entrySet())
 		{
 			sb.append(entry.getKey()).append(" -> ").append(entry.getValue()).append("\n");
 		}

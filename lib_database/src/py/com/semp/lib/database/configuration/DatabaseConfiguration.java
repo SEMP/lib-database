@@ -34,4 +34,18 @@ public class DatabaseConfiguration extends ConfigurationValues
 		this.setParameter(DatabaseEngine.class, DATABASE_ENGINE, Values.Defaults.DATABASE_ENGINE);
 		this.setParameter(Integer.class, CONNECTION_TIMEOUT_SECONDS, Values.Defaults.CONNECTION_TIMEOUT_SECONDS);
 	}
+	
+	public static void main(String[] args)
+	{
+		DatabaseConfiguration configuration = new DatabaseConfiguration();
+		
+		configuration.loadFromEnvironment();
+		
+		System.out.println(configuration);
+		
+		DatabaseEngine engine = configuration.getValue("databaseEngine");
+		
+		System.out.println(engine);
+		System.out.println(engine.getDriverClass());
+	}
 }
