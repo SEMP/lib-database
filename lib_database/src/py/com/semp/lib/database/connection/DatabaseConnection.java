@@ -11,6 +11,7 @@ import java.sql.Statement;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import py.com.semp.lib.database.configuration.DatabaseConfiguration;
 import py.com.semp.lib.database.configuration.Values;
@@ -191,8 +192,6 @@ public final class DatabaseConnection implements AutoCloseable
 	 */
 	public void connect() throws DataAccessException
 	{
-		this.assertConfigured();
-		
 		if(this.isConnected())
 		{
 			String errorMessage = MessageUtil.getMessage(Messages.ALREADY_CONNECTED_ERROR);
@@ -200,13 +199,15 @@ public final class DatabaseConnection implements AutoCloseable
 			throw new DataAccessException(errorMessage);
 		}
 		
-		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		DatabaseConfiguration configuration = this.getConfiguration();
+		
+		DatabaseEngine dbEngine = configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
 		
 		String driverClass = dbEngine.getDriverClass();
-		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
-		Integer timeout = this.configuration.getValue(Values.VariableNames.CONNECTION_TIMEOUT_SECONDS);
-		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
-		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		String url = configuration.getValue(Values.VariableNames.DATABASE_URL);
+		Integer timeout = configuration.getValue(Values.VariableNames.CONNECTION_TIMEOUT_SECONDS);
+		String user = configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
+		String password = configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
 		
 		try
 		{
@@ -290,6 +291,23 @@ public final class DatabaseConnection implements AutoCloseable
 		this.assertConnected();
 		
 		return this.connection;
+	}
+	
+	/**
+	 * Retrieves the current {@link DatabaseConfiguration} associated with this connection.
+	 * <p>
+	 * This method ensures that the configuration has been properly set before returning it.
+	 * If the configuration is not set, a {@link DataAccessException} will be thrown.
+	 * </p>
+	 *
+	 * @return the {@code DatabaseConfiguration} used by this connection.
+	 * @throws DataAccessException if the configuration has not been initialized.
+	 */
+	protected DatabaseConfiguration getConfiguration() throws DataAccessException
+	{
+		this.assertConfigured();
+		
+		return this.configuration;
 	}
 	
 	/**
@@ -513,9 +531,11 @@ public final class DatabaseConnection implements AutoCloseable
 		this.assertConfigured();
 		this.assertConnected();
 		
+		Statement statement = null;
+		
 		try
 		{
-			Statement statement = this.connection.createStatement();
+			statement = this.connection.createStatement();
 			
 			Integer fetchSize = this.configuration.getValue(Values.VariableNames.DATABASE_FETCH_SIZE);
 			
@@ -528,6 +548,20 @@ public final class DatabaseConnection implements AutoCloseable
 		}
 		catch(SQLException e)
 		{
+			if(statement != null)
+			{
+				try
+				{
+					statement.close();
+				}
+				catch(SQLException closeException)
+				{
+					e.addSuppressed(closeException);
+					
+				    this.logger.warning(closeException);
+				}
+			}
+			
 			String errorMessage = MessageUtil.getMessage(Messages.CREATING_STATEMENT_ERROR);
 			
 			throw new DataAccessException(errorMessage, e);
@@ -552,9 +586,11 @@ public final class DatabaseConnection implements AutoCloseable
 		this.assertConfigured();
 		this.assertConnected();
 		
+		PreparedStatement preparedStatement = null;
+		
 		try
 		{
-			PreparedStatement preparedStatement = this.connection.prepareStatement(sql);
+			preparedStatement = this.connection.prepareStatement(sql);
 			
 			Integer fetchSize = this.configuration.getValue(Values.VariableNames.DATABASE_FETCH_SIZE);
 			
@@ -567,6 +603,20 @@ public final class DatabaseConnection implements AutoCloseable
 		}
 		catch(SQLException e)
 		{
+			if(preparedStatement != null)
+			{
+				try
+				{
+					preparedStatement.close();
+				}
+				catch(SQLException closeException)
+				{
+					e.addSuppressed(closeException);
+					
+				    this.logger.warning(closeException);
+				}
+			}
+			
 			String errorMessage = MessageUtil.getMessage(Messages.CREATING_PREPARED_STATEMENT_ERROR, sql);
 			
 			throw new DataAccessException(errorMessage, e);
@@ -891,57 +941,45 @@ public final class DatabaseConnection implements AutoCloseable
 			return false;
 		}
 		
-		DatabaseConnection conexion = (DatabaseConnection)obj;
+		DatabaseConnection other = (DatabaseConnection)obj;
+		
+		if(this.configuration == other.configuration)
+		{
+			return true;
+		}
+		
+		if(this.configuration == null || other.configuration == null)
+		{
+			return false;
+		}
 		
 		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
 		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
 		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
-		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
 		
-		DatabaseEngine objDbEngine = conexion.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
-		String objUrl = conexion.configuration.getValue(Values.VariableNames.DATABASE_URL);
-		String objUser = conexion.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
-		String objPassword = conexion.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		DatabaseEngine otherDbEngine = other.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
+		String otherUrl = other.configuration.getValue(Values.VariableNames.DATABASE_URL);
+		String otherUser = other.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
 		
-		if(!((dbEngine == null) ? objDbEngine == null : dbEngine == objDbEngine))
-		{
-			return false;
-		}
-		
-		if(!((url == null) ? objUrl == null : url.equals(objUrl)))
-		{
-			return false;
-		}
-		
-		if(!((user== null) ? objUser == null : user.equals(objUser)))
-		{
-			return false;
-		}
-		
-		if(!((password == null) ? objPassword == null : password.equals(objPassword)))
-		{
-			return false;
-		}
-		
-		return true;
+		return Objects.equals(dbEngine, otherDbEngine)
+			    && Objects.equals(url, otherUrl)
+			    && Objects.equals(user, otherUser);
 	}
 	
 	@Override
-	public int hashCode() 
+	public int hashCode()
 	{
-		DatabaseEngine dbEngine = this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE);
-		String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
-		String user = this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME);
-		String password = this.configuration.getValue(Values.VariableNames.DATABASE_PASSWORD);
+		if(this.configuration == null)
+		{
+			return 0;
+		}
 		
-		final int prime = 31;
-		int result = 1;
-		result = prime * result	+ ((dbEngine == null) ? 0 : dbEngine.hashCode());
-		result = prime * result + ((url == null) ? 0 : url.hashCode());
-		result = prime * result + ((user == null) ? 0 : user.hashCode());
-		result = prime * result + ((password == null) ? 0 : password.hashCode());
-		
-		return result;
+		return Objects.hash
+		(
+			this.configuration.getValue(Values.VariableNames.DATABASE_ENGINE),
+			this.configuration.getValue(Values.VariableNames.DATABASE_URL),
+			this.configuration.getValue(Values.VariableNames.DATABASE_USER_NAME)
+		);
 	}
 	
 	@Override
