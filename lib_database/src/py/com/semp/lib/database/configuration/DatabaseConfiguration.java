@@ -35,6 +35,7 @@ public class DatabaseConfiguration extends ConfigurationValues
 		this.setParameter(Integer.class, CONNECTION_TIMEOUT_SECONDS, Values.Defaults.CONNECTION_TIMEOUT_SECONDS);
 	}
 	
+	//FIXME remove
 	public static void main(String[] args)
 	{
 		DatabaseConfiguration configuration = new DatabaseConfiguration();
