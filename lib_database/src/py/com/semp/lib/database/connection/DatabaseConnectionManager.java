@@ -14,7 +14,7 @@ import py.com.semp.lib.utilidades.exceptions.DataAccessException;
  *
  * <p>By default, connections are stored per thread. If needed, you can supply a custom key to manage them per user or session.</p>
  *
- * @author Sergio
+ * @author Sergio Morel
  */
 public final class DatabaseConnectionManager
 {
@@ -33,6 +33,27 @@ public final class DatabaseConnectionManager
 	public static Object getDefaultKey()
 	{
 		return Thread.currentThread();
+	}
+	
+	/**
+	 * Acquires a {@link DatabaseConnection} using database parameters loaded from environment variables.
+	 * <p>
+	 * This method uses {@link DatabaseConfiguration#loadFromEnvironment()} to initialize the connection
+	 * parameters (such as driver, URL, username, and password), and returns a {@code DatabaseConnection}
+	 * instance for the current key (typically the current thread).
+	 * <p>
+	 * If a connection for the current key already exists, it will be reused.
+	 *
+	 * @return a valid {@link DatabaseConnection} instance
+	 * @throws DataAccessException if the connection could not be established due to missing or invalid configuration
+	 */
+	public static DatabaseConnection getConnection() throws DataAccessException
+	{
+		DatabaseConfiguration configuration = new DatabaseConfiguration();
+		
+		configuration.loadFromEnvironment();
+		
+		return getConnection(configuration);
 	}
 	
 	/**
@@ -60,7 +81,9 @@ public final class DatabaseConnectionManager
 	{
 		if(key == null)
 		{
-			throw new IllegalArgumentException("Connection key cannot be null.");
+			String errorMessage = MessageUtil.getMessage(Messages.NULL_VALUE_ERROR, "Connection key");
+			
+			throw new IllegalArgumentException(errorMessage);
 		}
 		
 		DatabaseConnection current = connectionsMap.get(key);
@@ -71,6 +94,7 @@ public final class DatabaseConnectionManager
 			{
 				current.connect();
 			}
+			
 			return current;
 		}
 		
@@ -81,9 +105,11 @@ public final class DatabaseConnectionManager
 		}
 		
 		DatabaseConnection connection = new DatabaseConnection(key, configuration);
+		
 		connection.connect();
 		
 		connectionsMap.put(key, connection);
+		
 		return connection;
 	}
 	
@@ -103,6 +129,7 @@ public final class DatabaseConnectionManager
 		if(key == null) return;
 		
 		DatabaseConnection connection = connectionsMap.remove(key);
+		
 		if(connection != null)
 		{
 			connection.silentClose();
@@ -116,12 +143,14 @@ public final class DatabaseConnectionManager
 	{
 		for(Map.Entry<Object, DatabaseConnection> entry : connectionsMap.entrySet())
 		{
-			DatabaseConnection conn = entry.getValue();
-			if(conn != null)
+			DatabaseConnection connection = entry.getValue();
+			
+			if(connection != null)
 			{
-				conn.silentClose();
+				connection.silentClose();
 			}
 		}
+		
 		connectionsMap.clear();
 	}
 	
@@ -134,16 +163,32 @@ public final class DatabaseConnectionManager
 	}
 	
 	/**
-	 * Returns a human-readable list of current connections.
+	 * Returns a human-readable summary of all currently tracked {@link DatabaseConnection} instances.
+	 * <p>
+	 * Each line maps a key (usually a thread or custom session object) to its associated connection,
+	 * using the {@code toString()} of each {@code DatabaseConnection}. This makes the output concise
+	 * and suitable for logging or console output.
+	 * <p>
+	 * Example output:
+	 * <pre>
+	 * Thread[main,5,main] -> DatabaseConnection [✔]: jdbc:postgresql://localhost/db
+	 * Thread[worker-1,5,main] -> DatabaseConnection [✘]: (no url)
+	 * Total: 2
+	 * </pre>
+	 *
+	 * @return a string listing all connections and their keys, followed by the total count
 	 */
 	public static String connectionsToString()
 	{
 		StringBuilder sb = new StringBuilder();
+		
 		for(Map.Entry<Object, DatabaseConnection> entry : connectionsMap.entrySet())
 		{
 			sb.append(entry.getKey()).append(" -> ").append(entry.getValue()).append("\n");
 		}
+		
 		sb.append("Total: ").append(getConnectionCount());
+		
 		return sb.toString();
 	}
 }

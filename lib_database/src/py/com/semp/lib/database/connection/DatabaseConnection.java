@@ -982,15 +982,57 @@ public final class DatabaseConnection implements AutoCloseable
 		);
 	}
 	
+	/**
+	 * Returns a detailed multi-line string representation of this {@code DatabaseConnection},
+	 * including its class name, connection status, and the full configuration object.
+	 * <p>
+	 * This method is intended for debugging or logging purposes where full visibility
+	 * into the connection's configuration is useful.
+	 *
+	 * @return a detailed string describing the connection and its configuration
+	 */
+	public String getConnectionDetails()
+	{
+		StringBuilder sb = new StringBuilder();
+		
+		boolean connected = this.isConnected();
+		
+		sb.append(this.getClass().getSimpleName());
+		sb.append(" [");
+		sb.append(connected ? "✔" : "✘");
+		sb.append("]:\n");
+		sb.append(this.configuration);
+		
+		return sb.toString();
+	}
+	
+	/**
+	 * Returns a concise, single-line string representation of this {@code DatabaseConnection},
+	 * including its class name, connection status, and the database URL (if available).
+	 * <p>
+	 * The connection status is shown as {@code ✔} if connected, or {@code ✘} if not.
+	 * If the configuration or URL is missing, {@code (no url)} is displayed instead.
+	 *
+	 * @return a short string summarizing the connection state and URL
+	 */
 	@Override
 	public String toString()
 	{
 		StringBuilder sb = new StringBuilder();
 		
-		sb.append(this.getClass().getSimpleName());
-		sb.append(":\n");
+		boolean connected = this.isConnected();
 		
-		sb.append(this.configuration);
+		sb.append(this.getClass().getSimpleName());
+		sb.append(" [");
+		sb.append(connected ? "✔" : "✘");
+		sb.append("]: ");
+		
+		if(this.configuration != null)
+		{
+			String url = this.configuration.getValue(Values.VariableNames.DATABASE_URL);
+			
+			sb.append(url != null ? url : "(no url)");
+		}
 		
 		return sb.toString();
 	}
