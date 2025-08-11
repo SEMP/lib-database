@@ -1,6 +1,11 @@
 package py.com.semp.lib.database.configuration;
 
-import static py.com.semp.lib.database.configuration.Values.VariableNames.*;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.CONNECTION_TIMEOUT_SECONDS;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.DATABASE_ENGINE;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.DATABASE_FETCH_SIZE;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.DATABASE_PASSWORD;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.DATABASE_URL;
+import static py.com.semp.lib.database.configuration.Values.VariableNames.DATABASE_USER_NAME;
 
 import py.com.semp.lib.database.connection.DatabaseEngine;
 import py.com.semp.lib.utilidades.configuration.ConfigurationValues;
@@ -33,20 +38,5 @@ public class DatabaseConfiguration extends ConfigurationValues
 	{
 		this.setParameter(DatabaseEngine.class, DATABASE_ENGINE, Values.Defaults.DATABASE_ENGINE);
 		this.setParameter(Integer.class, CONNECTION_TIMEOUT_SECONDS, Values.Defaults.CONNECTION_TIMEOUT_SECONDS);
-	}
-	
-	//FIXME remove
-	public static void main(String[] args)
-	{
-		DatabaseConfiguration configuration = new DatabaseConfiguration();
-		
-		configuration.loadFromEnvironment();
-		
-		System.out.println(configuration);
-		
-		DatabaseEngine engine = configuration.getValue("databaseEngine");
-		
-		System.out.println(engine);
-		System.out.println(engine.getDriverClass());
 	}
 }
