@@ -3,6 +3,10 @@
  */
 module lib_database
 {
-	requires java.sql;
-	requires lib_utilidades;
+	exports py.com.semp.lib.database.configuration;
+	exports py.com.semp.lib.database.connection;
+	exports py.com.semp.lib.database.utilities;
+	
+	requires transitive java.sql;
+	requires transitive lib_utilidades;
 }

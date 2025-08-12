@@ -239,11 +239,14 @@ public final class DatabaseConnection implements AutoCloseable
 		
 		try
 		{
-			DatabaseMetaData meta = this.getMetaData(); 
-			
-			String message = MessageUtil.getMessage(Messages.DATABASE_CONNECTED, meta.getDatabaseProductName(), meta.getDatabaseProductVersion());
-			
-			this.logger.info(message);
+			if(this.logger.isDebugging())
+			{
+				DatabaseMetaData meta = this.getMetaData(); 
+				
+				String message = MessageUtil.getMessage(Messages.DATABASE_CONNECTED, meta.getDatabaseProductName(), meta.getDatabaseProductVersion());
+				
+				this.logger.debug(message);
+			}
 		}
 		catch(SQLException e)
 		{
@@ -325,9 +328,12 @@ public final class DatabaseConnection implements AutoCloseable
 			{
 				this.connection.close();
 				
-				String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
-				
-				this.logger.debug(debugMessage);
+				if(this.logger.isDebugging())
+				{
+					String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
+					
+					this.logger.debug(debugMessage);
+				}
 			}
 			catch(SQLException e)
 			{
@@ -356,9 +362,12 @@ public final class DatabaseConnection implements AutoCloseable
 			{
 				this.connection.close();
 				
-				String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
-				
-				this.logger.debug(debugMessage);
+				if(this.logger.isDebugging())
+				{
+					String debugMessage = MessageUtil.getMessage(Messages.DATABASE_CLOSED);
+					
+					this.logger.debug(debugMessage);
+				}
 			}
 			catch(SQLException e)
 			{
@@ -433,9 +442,12 @@ public final class DatabaseConnection implements AutoCloseable
 		{
 			this.connection.setAutoCommit(autoCommit);
 			
-			String message = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT, autoCommit);
-			
-			this.logger.debug(message);
+			if(this.logger.isDebugging())
+			{
+				String message = MessageUtil.getMessage(Messages.SET_AUTO_COMMIT, autoCommit);
+				
+				this.logger.debug(message);
+			}
 		}
 		catch(SQLException e)
 		{
