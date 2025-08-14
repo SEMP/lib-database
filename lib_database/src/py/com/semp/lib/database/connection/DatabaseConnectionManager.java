@@ -81,9 +81,20 @@ public final class DatabaseConnectionManager
 	{
 		if(key == null)
 		{
-			String errorMessage = MessageUtil.getMessage(Messages.NULL_VALUE_ERROR, "Connection key");
+			StringBuilder methodName = new StringBuilder();
 			
-			throw new IllegalArgumentException(errorMessage);
+			methodName.append("[key] ");
+			methodName.append(DatabaseConnection.class.getSimpleName());
+			methodName.append(" ");
+			methodName.append(DatabaseConnectionManager.class.getSimpleName());
+			methodName.append("::");
+			methodName.append("getConnection(Object key, ");
+			methodName.append(DatabaseConfiguration.class.getSimpleName());
+			methodName.append(" configuration)");
+			
+			String errorMessage = MessageUtil.getMessage(Messages.NULL_VALUES_NOT_ALLOWED_ERROR, methodName.toString());
+			
+			throw new NullPointerException(errorMessage);
 		}
 		
 		DatabaseConnection current = connectionsMap.get(key);
