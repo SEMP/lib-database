@@ -58,36 +58,65 @@ public final class TypedRowLite
 		return values.length;
 	}
 	
-	public Object get(int index)
+	public <T> T get(int index)
 	{
-		return values[index];
+		Class<?> type = this.schema.getType(index);
+		
+		@SuppressWarnings("unchecked")
+		T value = (T) type.cast(values[index]);
+		
+		return value;
 	}
 	
-	public Object get(String column)
+	public <T> T get(String columnName)
 	{
-		Integer index = this.schema.indexOf(column);
+		Integer index = this.schema.indexOf(columnName);
 		
 		if(index == null)
 		{
-			String errorMessage = MessageUtil.getMessage(Messages.FIELD_NOT_FOUND_ERROR, column, tableName);
+			String tableName = this.schema.getTableName();
+			
+			String errorMessage = MessageUtil.getMessage(Messages.FIELD_NOT_FOUND_ERROR, columnName, tableName);
+			
 			throw new ObjectNotFoundException(errorMessage);
 		}
 		
-		return values[index];
+		return this.get(index);
 	}
 	
 	public <T> T get(int index, Class<T> type)
 	{
-		Object v = values[index];
-		return (v == null) ? null : type.cast(v);
+		Object value = values[index];
+		
+		if(value == null)
+		{
+			return null;
+		}
+		
+		return type.cast(value);
 	}
 	
-	public <T> T get(String column, Class<T> type)
+	public <T> T get(String columnName, Class<T> type)
 	{
-		Integer idx = schema.indexOf(column);
-		if(idx == null) return null;
-		Object v = values[idx];
-		return (v == null) ? null : type.cast(v);
+		Integer index = this.schema.indexOf(columnName);
+		
+		if(index == null)
+		{
+			String tableName = this.schema.getTableName();
+			
+			String errorMessage = MessageUtil.getMessage(Messages.FIELD_NOT_FOUND_ERROR, columnName, tableName);
+			
+			throw new ObjectNotFoundException(errorMessage);
+		}
+		
+		Object value = values[index];
+		
+		if(value == null)
+		{
+			return null;
+		}
+		
+		return type.cast(value);
 	}
 	
 	@Override
