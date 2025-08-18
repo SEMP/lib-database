@@ -274,7 +274,7 @@ public final class DatabaseConnection implements AutoCloseable
 		}
 		catch(SQLException e)
 		{
-			String errorMessage = MessageUtil.getMessage(Messages.UNABLE_T0_OBTAIN_METADATA_ERROR);
+			String errorMessage = MessageUtil.getMessage(Messages.UNABLE_TO_OBTAIN_METADATA_ERROR);
 			
 			throw new DataAccessException(errorMessage, e);
 		}
