@@ -82,19 +82,25 @@ public final class DatabaseBuilders
 	/**
      * Resolves the best Java class for the column at index {@code i}, using driver hints
      * and falling back to a JDBC class mapping.
-     */
+     * 
+	 * Note: LOB columns (CLOB/NCLOB/BLOB) and SQLXML are fully materialized
+	 * into String/byte[]/String respectively. For very large data, prefer
+	 * streaming via JDBC APIs instead of using this helper.
+	 *
+	 * For TIMESTAMP WITH TIME ZONE / TIME WITH TIME ZONE, this attempts
+	 * to return OffsetDateTime/OffsetTime; if the driver doesn't support the
+	 * typed getters, values are converted assuming UTC.
+	 */
 	public static Class<?> resolveJavaType(ResultSetMetaData metadata, int i)
 	{
 		Objects.requireNonNull(metadata, "metadata");
 		
-		// Use the driver-exposed Java class name
 		try
 		{
 			String className = metadata.getColumnClassName(i);
 			
-			if(className != null && !Object.class.getName().equals(className))
+			if(className != null && !className.isBlank() && !Object.class.getName().equals(className))
 			{
-				// cache to avoid repeated Class.forName on hot paths
 				return CLASS_CACHE.computeIfAbsent(className, DatabaseBuilders::forNameQuiet);
 			}
 		}
@@ -140,6 +146,13 @@ public final class DatabaseBuilders
 			    case java.sql.Types.CLOB:
 			    case java.sql.Types.NCLOB:						return String.class;
 			    case java.sql.Types.BLOB:						return byte[].class;
+			    case java.sql.Types.ROWID:						return java.sql.RowId.class;
+			    case java.sql.Types.DATALINK:					return java.net.URL.class;
+				case java.sql.Types.OTHER:						return getOtherType(metadata, i);
+				case java.sql.Types.DISTINCT:
+				case java.sql.Types.NULL:
+				case java.sql.Types.JAVA_OBJECT:
+				case java.sql.Types.STRUCT:
 				default:										return Object.class;
 			}
 		}
@@ -153,6 +166,32 @@ public final class DatabaseBuilders
 			
 			return Object.class;
 		}
+	}
+	
+	private static Class<?> getOtherType(ResultSetMetaData metadata, int i)
+	{
+		try
+		{
+			String typeName = metadata.getColumnTypeName(i);
+			
+			if("uuid".equalsIgnoreCase(typeName))
+			{
+				return java.util.UUID.class;
+			}
+			
+			if("json".equalsIgnoreCase(typeName) || "jsonb".equalsIgnoreCase(typeName))
+			{
+				return String.class;
+			}
+		}
+		catch(SQLException ignore)
+		{
+			Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+			
+			logger.debug(ignore);
+		}
+		
+		return Object.class;
 	}
 	
 	private static Class<?> forNameQuiet(String className)
@@ -425,6 +464,23 @@ public final class DatabaseBuilders
 				}
 			}
 			
+			if(resolvedType == java.util.UUID.class)
+			{
+				Object uuid = resultSet.getObject(i);
+				
+				if(uuid == null)
+				{
+					return null;
+				}
+				
+				if(uuid instanceof java.util.UUID)
+				{
+					return uuid;
+				}
+				
+				return java.util.UUID.fromString(uuid.toString());
+			}
+			
 			if(resolvedType == Object.class && jdbcType == java.sql.Types.ARRAY)
 			{
 				java.sql.Array array = resultSet.getArray(i);
@@ -451,6 +507,11 @@ public final class DatabaseBuilders
 						logger.debug(ignore);
 					}
 				}
+			}
+			
+			if(resolvedType == String.class)
+			{
+				return resultSet.getString(i);
 			}
 			
 			return resultSet.getObject(i);
