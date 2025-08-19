@@ -4,9 +4,12 @@ import java.lang.reflect.Array;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.time.format.DateTimeParseException;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -24,9 +27,13 @@ import py.com.semp.lib.utilidades.log.LoggerManager;
  */
 public final class DatabaseBuilders
 {
+	private static final int MAX_SIZE_LIMIT = Integer.MAX_VALUE;
+	
 	private static final ConcurrentMap<String, Class<?>> CLASS_CACHE = new ConcurrentHashMap<>();
 	
 	private static final Map<Class<?>, Class<?>> PRIMITIVE_TO_WRAPPER = new HashMap<>();
+	
+	private static final ThreadLocal<Calendar> UTC_CALENDAR = ThreadLocal.withInitial(() -> Calendar.getInstance(TimeZone.getTimeZone("UTC")));
 	
 	static
 	{
@@ -46,38 +53,6 @@ public final class DatabaseBuilders
 		
 		throw new AssertionError(errorMessage);
 	}
-	
-//	//FIXME revisar
-//	public static TypedResult toTypedResult(ResultSet resultSet) throws SQLException
-//	{
-//		ResultSetMetaData meta = resultSet.getMetaData();
-//		
-//		int columnCount = meta.getColumnCount();
-//		
-//		List<TypedRow> rows = new ArrayList<>();
-//		
-//		while(resultSet.next())
-//		{
-//			Map<String, TypedValue<?>> row = new LinkedHashMap<>();
-//			
-//			for(int i = 1; i <= columnCount; i++)
-//			{
-//				String label = meta.getColumnLabel(i);
-//				Object value = resultSet.getObject(i);
-//				Class<?> javaType = resolveJavaType(meta, i);
-//				
-//				// Create TypedValue with explicit type (even if value is null)
-//				@SuppressWarnings({"unchecked", "rawtypes"})
-//				TypedValue<?> typedValue = new TypedValue(javaType, value);
-//				
-//				row.put(label, typedValue);
-//			}
-//			
-//			rows.add(new TypedRow(row));
-//		}
-//		
-//		return new TypedResult(rows);
-//	}
 	
 	/**
      * Resolves the best Java class for the column at index {@code i}, using driver hints
@@ -133,9 +108,9 @@ public final class DatabaseBuilders
 				case java.sql.Types.REAL:						return Float.class;
 				case java.sql.Types.FLOAT:
 				case java.sql.Types.DOUBLE:						return Double.class;
-				case java.sql.Types.DATE:						return java.sql.Date.class;
-				case java.sql.Types.TIME:						return java.sql.Time.class;
-				case java.sql.Types.TIMESTAMP:					return java.sql.Timestamp.class;
+				case java.sql.Types.DATE:						return java.time.LocalDate.class;
+				case java.sql.Types.TIME:						return java.time.LocalTime.class;
+				case java.sql.Types.TIMESTAMP:					return java.time.LocalDateTime.class;
 				case java.sql.Types.TIMESTAMP_WITH_TIMEZONE:	return java.time.OffsetDateTime.class;
 				case java.sql.Types.TIME_WITH_TIMEZONE:			return java.time.OffsetTime.class;
 				case java.sql.Types.BINARY:
@@ -213,13 +188,13 @@ public final class DatabaseBuilders
 		}
 	}
 	
-	 /**
-     * Builds a {@link TypedSchema} from {@link ResultSetMetaData}.
-     * <p>
-     * {@code tableName} is populated only when <em>all</em> columns report the <em>same non-empty</em>
-     * name via {@code meta.getTableName(i)}. If any column is blank or mismatched (e.g., joins, expressions),
-     * the schema's {@code tableName} is {@code null}.
-     */
+	/**
+	* Builds a {@link TypedSchema} from {@link ResultSetMetaData}.
+	* <p>
+	* {@code tableName} is populated only when <em>all</em> columns report the <em>same non-empty</em>
+	* name via {@code meta.getTableName(i)}. If any column is blank or mismatched (e.g., joins, expressions),
+	* the schema's {@code tableName} is {@code null}.
+	*/
 	public static TypedSchema getTypedSchema(ResultSetMetaData metadata) throws DataAccessException
 	{
 		try
@@ -314,204 +289,74 @@ public final class DatabaseBuilders
 	{
 		try
 		{
-			if(resolvedType == java.time.OffsetDateTime.class)
-			{
-				try
-				{
-					return resultSet.getObject(i, java.time.OffsetDateTime.class);
-				}
-				catch(AbstractMethodError | SQLException e)
-				{
-					java.sql.Timestamp timeStamp = resultSet.getTimestamp(i);
-					
-					if(timeStamp == null)
-					{
-						return null;
-					}
-					
-					return timeStamp.toInstant().atOffset(java.time.ZoneOffset.UTC);
-				}
-			}
-			
-			if(resolvedType == Object[].class)
-			{
-				java.sql.Array array = resultSet.getArray(i);
-				
-				if(array == null)
-				{
-					return null;
-				}
-				
-				try
-				{
-					return materializeArray(array);
-				}
-				finally
-				{
-					try
-					{
-						array.free();
-					}
-					catch(SQLException ignore)
-					{
-						Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
-						
-						logger.debug(ignore);
-					}
-				}
-			}
-			
-			if(resolvedType == java.time.OffsetTime.class)
-			{
-				try
-				{
-					return resultSet.getObject(i, java.time.OffsetTime.class);
-				}
-				catch(AbstractMethodError | SQLException e)
-				{
-					java.sql.Time time = resultSet.getTime(i);
-					
-					if(time == null)
-					{
-						return null;
-					}
-					
-					return time.toLocalTime().atOffset(java.time.ZoneOffset.UTC);
-				}
-			}
-			
-			if(resolvedType == String.class && jdbcType == java.sql.Types.SQLXML)
-			{
-				java.sql.SQLXML xml = resultSet.getSQLXML(i);
-				
-				if(xml == null)
-				{
-					return null;
-				}
-				
-				try
-				{
-					return xml.getString();
-				}
-				finally
-				{
-					try
-					{
-						xml.free();
-					}
-					catch(SQLException ignore)
-					{
-						Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
-						
-						logger.debug(ignore);
-					}
-				}
-			}
-			
-			if(resolvedType == String.class && (jdbcType == java.sql.Types.CLOB || jdbcType == java.sql.Types.NCLOB))
-			{
-				java.sql.Clob clob = resultSet.getClob(i);
-				
-				if(clob == null)
-				{
-					return null;
-				}
-				
-				try
-				{
-					return readClobFully(clob);
-				}
-				finally
-				{
-					try
-					{
-						clob.free();
-					}
-					catch(SQLException ignore)
-					{
-						Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
-						
-						logger.debug(ignore);
-					}
-				}
-			}
-			
-			if(resolvedType == byte[].class && jdbcType == java.sql.Types.BLOB)
-			{
-				java.sql.Blob blob = resultSet.getBlob(i);
-				
-				if(blob == null)
-				{
-					return null;
-				}
-				
-				try
-				{
-					return readBlobFully(blob);
-				}
-				finally
-				{
-					try
-					{
-						blob.free();
-					}
-					catch(SQLException ignore)
-					{
-						Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
-						
-						logger.debug(ignore);
-					}
-				}
-			}
-			
-			if(resolvedType == java.util.UUID.class)
-			{
-				Object uuid = resultSet.getObject(i);
-				
-				if(uuid == null)
-				{
-					return null;
-				}
-				
-				if(uuid instanceof java.util.UUID)
-				{
-					return uuid;
-				}
-				
-				return java.util.UUID.fromString(uuid.toString());
-			}
-			
-			if(resolvedType == Object.class && jdbcType == java.sql.Types.ARRAY)
-			{
-				java.sql.Array array = resultSet.getArray(i);
-				
-				if(array == null)
-				{
-					return null;
-				}
-				
-				try
-				{
-					return materializeArray(array);
-				}
-				finally
-				{
-					try
-					{
-						array.free();
-					}
-					catch(SQLException ignore)
-					{
-						Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
-						
-						logger.debug(ignore);
-					}
-				}
-			}
-			
 			if(resolvedType == String.class)
 			{
+				if(jdbcType == java.sql.Types.SQLXML)
+				{
+					return getXMLString(resultSet, i);
+				}
+				else if(jdbcType == java.sql.Types.CLOB || jdbcType == java.sql.Types.NCLOB)
+				{
+					return getClobString(resultSet, i);
+				}
+				
 				return resultSet.getString(i);
+			}
+			else if(resolvedType == byte[].class)
+			{
+				boolean binaryArrayType = 
+					jdbcType == java.sql.Types.BINARY
+					|| jdbcType == java.sql.Types.VARBINARY
+					|| jdbcType == java.sql.Types.LONGVARBINARY;
+				
+				if(binaryArrayType)
+				{
+					return resultSet.getBytes(i);
+				}
+				else if(jdbcType == java.sql.Types.BLOB)
+				{
+					return getBlobByteArray(resultSet, i);
+				}
+			}
+			else if(resolvedType == java.time.OffsetDateTime.class)
+			{
+				return getOffsetDateTime(resultSet, i);
+			}
+			else if(resolvedType == java.time.OffsetTime.class)
+			{
+				return getOffsetTime(resultSet, i);
+			}
+			else if(resolvedType == java.time.LocalDate.class)
+			{
+				return getLocalDate(resultSet, i);
+			}
+			else if(resolvedType == java.time.LocalTime.class)
+			{
+				return getLocalTime(resultSet, i);
+			}
+			else if(resolvedType == java.time.LocalDateTime.class)
+			{
+				return getLocalDateTime(resultSet, i);
+			}
+			else if(resolvedType == Object[].class)
+			{
+				return getObjectArray(resultSet, i);
+			}
+			else if(resolvedType == java.util.UUID.class)
+			{
+				return getUUID(resultSet, i);
+			}
+			else if(resolvedType == java.sql.RowId.class)
+			{
+				return resultSet.getRowId(i);
+			}
+			else if(resolvedType == java.net.URL.class)
+			{
+				return resultSet.getURL(i);
+			}
+			else if(resolvedType == Object.class && jdbcType == java.sql.Types.ARRAY)
+			{
+				return getArray(resultSet, i);
 			}
 			
 			return resultSet.getObject(i);
@@ -519,6 +364,286 @@ public final class DatabaseBuilders
 		catch(SQLException e)
 		{
 			throw new DataAccessException(e);
+		}
+	}
+	
+	private static Object getArray(ResultSet resultSet, int i) throws SQLException
+	{
+		java.sql.Array array = resultSet.getArray(i);
+		
+		if(array == null)
+		{
+			return null;
+		}
+		
+		try
+		{
+			return materializeArray(array);
+		}
+		finally
+		{
+			try
+			{
+				array.free();
+			}
+			catch(SQLException ignore)
+			{
+				Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+				
+				logger.debug(ignore);
+			}
+		}
+	}
+	
+	private static java.util.UUID getUUID(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.util.UUID.class);
+		}
+		catch(AbstractMethodError | SQLException ignore)
+		{
+			Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+			
+			logger.debug(ignore);
+		}
+		
+		Object uuid = resultSet.getObject(i);
+		
+		if(uuid == null)
+		{
+			return null;
+		}
+		
+		if(uuid instanceof java.util.UUID)
+		{
+			return (java.util.UUID) uuid;
+		}
+		
+		return java.util.UUID.fromString(uuid.toString());
+	}
+	
+	private static byte[] getBlobByteArray(ResultSet resultSet, int i) throws SQLException
+	{
+		java.sql.Blob blob = resultSet.getBlob(i);
+		
+		try
+		{
+			return readBlobFully(blob);
+		}
+		finally
+		{
+			try
+			{
+				if(blob != null) blob.free();
+			}
+			catch(SQLException ignore)
+			{
+				Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+				
+				logger.debug(ignore);
+			}
+		}
+	}
+	
+	private static String getClobString(ResultSet resultSet, int i) throws SQLException
+	{
+		java.sql.Clob clob = resultSet.getClob(i);
+		
+		try
+		{
+			return readClobFully(clob);
+		}
+		finally
+		{
+			try
+			{
+				if(clob != null) clob.free();
+			}
+			catch(SQLException ignore)
+			{
+				Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+				
+				logger.debug(ignore);
+			}
+		}
+	}
+	
+	private static String getXMLString(ResultSet resultSet, int i) throws SQLException
+	{
+		java.sql.SQLXML xml = resultSet.getSQLXML(i);
+		
+		if(xml == null)
+		{
+			return null;
+		}
+		
+		try
+		{
+			return xml.getString();
+		}
+		finally
+		{
+			try
+			{
+				xml.free();
+			}
+			catch(SQLException ignore)
+			{
+				Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+				
+				logger.debug(ignore);
+			}
+		}
+	}
+	
+	private static Object[] getObjectArray(ResultSet resultSet, int i) throws SQLException
+	{
+		java.sql.Array array = resultSet.getArray(i);
+		
+		try
+		{
+			return (Object[]) materializeArray(array);
+		}
+		finally
+		{
+			try
+			{
+				if(array != null) array.free();
+			}
+			catch(SQLException ignore)
+			{
+				Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+				
+				logger.debug(ignore);
+			}
+		}
+	}
+	
+	private static java.time.LocalDateTime getLocalDateTime(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.time.LocalDateTime.class);
+		}
+		catch(AbstractMethodError | SQLException e)
+		{
+			java.sql.Timestamp timeStamp = resultSet.getTimestamp(i);
+			
+			if(timeStamp == null)
+			{
+				return null;
+			}
+			
+			return timeStamp.toLocalDateTime();
+		}
+	}
+	
+	private static java.time.LocalTime getLocalTime(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.time.LocalTime.class);
+		}
+		catch(AbstractMethodError | SQLException e)
+		{
+			java.sql.Time time = resultSet.getTime(i);
+			
+			if(time == null)
+			{
+				return null;
+			}
+			
+			return time.toLocalTime();
+		}
+	}
+	
+	private static java.time.LocalDate getLocalDate(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.time.LocalDate.class);
+		}
+		catch(AbstractMethodError | SQLException e)
+		{
+			java.sql.Date date = resultSet.getDate(i);
+			
+			if(date == null)
+			{
+				return null;
+			}
+			
+			return date.toLocalDate();
+		}
+	}
+	
+	private static java.time.OffsetTime getOffsetTime(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.time.OffsetTime.class);
+		}
+		catch(AbstractMethodError | SQLException e)
+		{
+			String timeString = resultSet.getString(i);
+			
+			if(timeString != null)
+			{
+				try
+				{
+					return java.time.OffsetTime.parse(timeString);
+				}
+				catch(DateTimeParseException ignore)
+				{
+					Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+					
+					logger.debug(ignore);
+				}
+			}
+			
+			java.sql.Time time = resultSet.getTime(i, UTC_CALENDAR.get());
+			
+			if(time == null)
+			{
+				return null;
+			}
+			
+			return time.toLocalTime().atOffset(java.time.ZoneOffset.UTC);
+		}
+	}
+	
+	private static java.time.OffsetDateTime getOffsetDateTime(ResultSet resultSet, int i) throws SQLException
+	{
+		try
+		{
+			return resultSet.getObject(i, java.time.OffsetDateTime.class);
+		}
+		catch(AbstractMethodError | SQLException e)
+		{
+			String dateString = resultSet.getString(i);
+			
+			if(dateString != null)
+			{
+				try
+				{
+					return java.time.OffsetDateTime.parse(dateString);
+				}
+				catch(DateTimeParseException ignore)
+				{
+					Logger logger = LoggerManager.getLogger(Values.Constants.DATABASE_CONTEXT);
+					
+					logger.debug(ignore);
+				}
+			}
+			
+			java.sql.Timestamp timeStamp = resultSet.getTimestamp(i, UTC_CALENDAR.get());
+			
+			if(timeStamp == null)
+			{
+				return null;
+			}
+			
+			return timeStamp.toInstant().atOffset(java.time.ZoneOffset.UTC);
 		}
 	}
 	
@@ -547,6 +672,11 @@ public final class DatabaseBuilders
 	
 	private static Object materializeArray(java.sql.Array array) throws SQLException
 	{
+		if(array == null)
+		{
+			return null;
+		}
+		
 		Object raw = array.getArray();
 		
 		if(raw == null)
@@ -573,9 +703,14 @@ public final class DatabaseBuilders
 	
 	private static String readClobFully(java.sql.Clob clob) throws SQLException
 	{
+		if(clob == null)
+		{
+			return null;
+		}
+		
 		long length = clob.length();
 		
-		if(length > Integer.MAX_VALUE)
+		if(length > MAX_SIZE_LIMIT)
 		{
 			String errorMessage = MessageUtil.getMessage(Messages.TOO_LARGE_TO_MATERIALIZE_ERROR, "CLOB", length);
 			
@@ -587,9 +722,14 @@ public final class DatabaseBuilders
 	
 	private static byte[] readBlobFully(java.sql.Blob blob) throws SQLException
 	{
+		if(blob == null)
+		{
+			return null;
+		}
+		
 		long length = blob.length();
 		
-		if(length > Integer.MAX_VALUE)
+		if(length > MAX_SIZE_LIMIT)
 		{
 			String errorMessage = MessageUtil.getMessage(Messages.TOO_LARGE_TO_MATERIALIZE_ERROR, "BLOB", length);
 			
